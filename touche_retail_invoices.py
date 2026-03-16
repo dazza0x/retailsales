@@ -1,9 +1,6 @@
 import streamlit as st
-import csv
 import io
-import subprocess
-import tempfile
-import os
+import xlrd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -155,21 +152,29 @@ def opfill(hex_col):
 
 
 def xls_to_csv_rows(uploaded_file):
-    """Convert an uploaded XLS to CSV rows using LibreOffice."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        xls_path = os.path.join(tmpdir, "input.xls")
-        with open(xls_path, "wb") as f:
-            f.write(uploaded_file.read())
-        subprocess.run(
-            ["libreoffice", "--headless", "--convert-to", "csv", xls_path,
-             "--outdir", tmpdir],
-            capture_output=True,
-        )
-        csv_path = os.path.join(tmpdir, "input.csv")
-        if not os.path.exists(csv_path):
-            return None
-        with open(csv_path, newline="") as f:
-            return list(csv.reader(f))
+    """Read an uploaded XLS file and return rows as a list of string lists."""
+    try:
+        data = uploaded_file.read()
+        wb = xlrd.open_workbook(file_contents=data)
+        ws = wb.sheet_by_index(0)
+        rows = []
+        for r in range(ws.nrows):
+            row = []
+            for c in range(ws.ncols):
+                cell = ws.cell(r, c)
+                if cell.ctype == xlrd.XL_CELL_EMPTY:
+                    row.append('')
+                elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                    # Preserve numeric precision as string
+                    row.append(str(cell.value))
+                elif cell.ctype == xlrd.XL_CELL_DATE:
+                    row.append(str(cell.value))
+                else:
+                    row.append(str(cell.value).strip())
+            rows.append(row)
+        return rows
+    except Exception as e:
+        return None
 
 
 def parse_sales(rows):
