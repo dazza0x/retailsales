@@ -178,77 +178,76 @@ def xls_to_csv_rows(uploaded_file):
 
 
 def _cell(row, idx):
-    """Safely get a stripped cell value by index."""
+    """Safely get a stripped string value by column index."""
     try:
         return str(row[idx]).strip()
     except IndexError:
         return ''
 
 
+def _find_col(rows, target, search_rows=15):
+    """Scan the first N rows to find the column index of a header value."""
+    for row in rows[:search_rows]:
+        for j, val in enumerate(row):
+            if str(val).strip() == target:
+                return j
+    return None
+
+
 def parse_sales(rows):
     """
-    Parse retail sales rows using fixed column positions from SalonIQ XLS layout:
-      col 1  = name
-      col 6  = qty  (product rows)
-      col 7  = qty  (supplier subtotal and stylist summary rows)
-      col 10 = exc VAT
-      col 12 = inc VAT
+    Parse retail sales rows dynamically using header detection.
 
-    Stylist rows sit immediately after a supplier subtotal row (col 7 has a value,
-    col 6 is empty) and are not in SKIP_TERMS or NON_PRODUCT.
+    Detects 'Description' and 'Qty' column positions from the header row.
+    Products have qty in the Qty column; supplier subtotals and stylist
+    summary rows have qty one column to the right (SalonIQ layout).
 
     Returns dict: {stylist_name: [{'product': str, 'qty': int}, ...]}
     """
     SUPPLIER_SUBTOTALS = {'Inspired Hair Supplies', 'Salon Success', 'Client Deposit Lost'}
 
-    # First pass: collect all rows that have a name and a col-7 qty (subtotals + stylists)
-    subtotal_style_rows = []
-    for row in rows:
-        name = _cell(row, 1)
-        qty7 = _cell(row, 7)
-        qty6 = _cell(row, 6)
-        if name and qty7 and not qty6:
-            try:
-                float(qty7)
-                subtotal_style_rows.append(name)
-            except ValueError:
-                pass
+    name_col = _find_col(rows, 'Description') or 1
+    qty_col  = _find_col(rows, 'Qty') or 6
+    sub_col  = qty_col + 1  # subtotals and stylist rows use the next column
 
-    # Stylist names = col-7 rows that are NOT supplier subtotals, NOT skip/non-product,
-    # and NOT 'Grand Total'
+    # First pass: find stylist names.
+    # Stylist rows have a value in sub_col but not qty_col,
+    # and immediately follow a supplier subtotal row with the same pattern.
     stylist_names = set()
     prev_was_subtotal = False
-    for name in subtotal_style_rows:
-        if name in SUPPLIER_SUBTOTALS:
+    for row in rows:
+        name    = _cell(row, name_col)
+        qty_val = _cell(row, qty_col)
+        sub_val = _cell(row, sub_col)
+        if not name:
+            continue
+        is_sub_row = bool(sub_val and not qty_val)
+        if name in SUPPLIER_SUBTOTALS and is_sub_row:
             prev_was_subtotal = True
-        elif name not in SKIP_TERMS and name not in NON_PRODUCT and name != 'Grand Total':
+        elif is_sub_row and name not in SKIP_TERMS and name not in NON_PRODUCT \
+                and name != 'Grand Total':
             if prev_was_subtotal:
                 stylist_names.add(name)
             prev_was_subtotal = False
         else:
             prev_was_subtotal = False
 
-    # Second pass: collect products and assign to stylists
+    # Second pass: collect products per stylist
     stylists, pending = {}, []
     for row in rows:
-        name = _cell(row, 1)
-        qty6 = _cell(row, 6)
-        qty7 = _cell(row, 7)
-
+        name    = _cell(row, name_col)
+        qty_val = _cell(row, qty_col)
+        sub_val = _cell(row, sub_col)
         if not name:
             continue
-
         if name in stylist_names:
-            # Stylist summary row — assign buffered products
             stylists[name] = list(pending)
             pending = []
         elif name == 'Grand Total':
             pending = []
-        elif qty6 and not qty7 and name not in SKIP_TERMS and name not in NON_PRODUCT:
-            # Product row
+        elif qty_val and not sub_val and name not in SKIP_TERMS and name not in NON_PRODUCT:
             try:
-                qty = int(float(qty6))
-                pending.append({'product': name, 'qty': qty})
+                pending.append({'product': name, 'qty': int(float(qty_val))})
             except ValueError:
                 pass
 
@@ -257,16 +256,22 @@ def parse_sales(rows):
 
 def parse_stock(rows):
     """
-    Parse stock valuation rows using fixed column positions from SalonIQ XLS layout:
-      col 1  = product name
-      col 15 = cost price
+    Parse stock valuation rows dynamically using header detection.
+
+    Detects 'Description' and 'Cost' column positions from the header row.
 
     Returns dict: {product_name: cost_price}
     """
+    name_col = _find_col(rows, 'Description') or 1
+    cost_col = _find_col(rows, 'Cost')
+
+    if cost_col is None:
+        return {}
+
     stock = {}
     for row in rows:
-        name = _cell(row, 1)
-        cost_str = _cell(row, 15)
+        name     = _cell(row, name_col)
+        cost_str = _cell(row, cost_col)
         if not name or not cost_str:
             continue
         try:
