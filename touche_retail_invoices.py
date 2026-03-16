@@ -251,6 +251,35 @@ def parse_stock(rows):
     return stock
 
 
+def parse_period(rows):
+    """
+    Extract the report period from the sales CSV.
+    SalonIQ puts it on the row after 'RETAIL SALES BY TEAM MEMBER',
+    formatted as e.g. '15/02/26 to 15/03/26'.
+    Returns a formatted string like '15 Feb 2026 – 15 Mar 2026', or None.
+    """
+    from datetime import datetime
+    for i, row in enumerate(rows):
+        v = [c.strip() for c in row if c.strip()]
+        if any('RETAIL SALES BY TEAM MEMBER' in val for val in v):
+            # Period is on the next non-empty row
+            for next_row in rows[i + 1:]:
+                nv = [c.strip() for c in next_row if c.strip()]
+                if nv:
+                    raw = nv[0]
+                    # Expect "DD/MM/YY to DD/MM/YY"
+                    if ' to ' in raw:
+                        parts = raw.split(' to ')
+                        try:
+                            d1 = datetime.strptime(parts[0].strip(), '%d/%m/%y')
+                            d2 = datetime.strptime(parts[1].strip(), '%d/%m/%y')
+                            return f"{d1.strftime('%-d %b %Y')} – {d2.strftime('%-d %b %Y')}"
+                        except ValueError:
+                            return raw  # return as-is if parsing fails
+                    break
+    return None
+
+
 def build_workbook(salon_name, period, stylists, stock):
     wb = Workbook()
     wb.remove(wb.active)
@@ -476,16 +505,8 @@ def workbook_to_bytes(wb):
 
 # ── UI ─────────────────────────────────────────────────────────────────
 
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown('<div class="section-label">Salon</div>', unsafe_allow_html=True)
-    salon = st.selectbox("Salon", ["Caterham", "Purley"], label_visibility="collapsed")
-
-with col2:
-    st.markdown('<div class="section-label">Report period</div>', unsafe_allow_html=True)
-    period = st.text_input("Period", placeholder="e.g. 15 Feb – 15 Mar 2026",
-                           label_visibility="collapsed")
+st.markdown('<div class="section-label">Salon</div>', unsafe_allow_html=True)
+salon = st.selectbox("Salon", ["Caterham", "Purley"], label_visibility="collapsed")
 
 st.markdown('<hr class="thin-rule">', unsafe_allow_html=True)
 
@@ -512,8 +533,6 @@ st.markdown('<hr class="thin-rule">', unsafe_allow_html=True)
 if st.button("Generate Invoices", use_container_width=True, type="primary"):
     if not sales_file or not stock_file:
         st.error("Please upload both files before generating.")
-    elif not period.strip():
-        st.error("Please enter the report period.")
     else:
         with st.spinner("Processing…"):
             sales_rows = xls_to_csv_rows(sales_file)
@@ -522,6 +541,10 @@ if st.button("Generate Invoices", use_container_width=True, type="primary"):
             if sales_rows is None or stock_rows is None:
                 st.error("Could not read one of the uploaded files. Please check they are valid XLS exports from SalonIQ.")
                 st.stop()
+
+            period = parse_period(sales_rows)
+            if not period:
+                period = "Period unknown"
 
             stylists = parse_sales(sales_rows)
             stock    = parse_stock(stock_rows)
@@ -536,11 +559,11 @@ if st.button("Generate Invoices", use_container_width=True, type="primary"):
                     item['cost'] = stock.get(item['product'])
 
             # Build workbook
-            wb = build_workbook(salon, period.strip(), stylists, stock)
+            wb = build_workbook(salon, period, stylists, stock)
             xlsx_bytes = workbook_to_bytes(wb)
 
         # ── Summary preview ────────────────────────────────────────────
-        st.markdown(f"### {salon} · {period.strip()}")
+        st.markdown(f"### {salon} · {period}")
 
         unmatched_products = set()
         rows_html = ""
@@ -603,7 +626,7 @@ if st.button("Generate Invoices", use_container_width=True, type="primary"):
             )
 
         st.markdown("<br>", unsafe_allow_html=True)
-        filename = f"Touche_{salon}_Retail_Invoices_{period.strip().replace(' ', '_').replace('–','-')}.xlsx"
+        filename = f"Touche_{salon}_Retail_Invoices_{period.replace(' ', '_').replace('–','-')}.xlsx"
         st.download_button(
             label="⬇  Download Invoice Spreadsheet",
             data=xlsx_bytes,
