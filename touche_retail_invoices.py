@@ -401,22 +401,26 @@ def build_workbook(salon_name, period, stylists, stock):
             c.alignment = Alignment(horizontal='center', vertical='center')
 
             if cost is not None:
+                cost_ex = round(cost * qty, 2)
+                vat     = round(cost_ex * 0.2, 2)
+                total   = round(cost_ex + vat, 2)
+
                 c = ws.cell(row=r, column=3, value=cost)
                 c.font = font; c.fill = row_fill; c.border = brd
                 c.number_format = POUND
                 c.alignment = Alignment(horizontal='right', vertical='center')
 
-                c = ws.cell(row=r, column=4, value=f"=B{r}*C{r}")
+                c = ws.cell(row=r, column=4, value=cost_ex)
                 c.font = font; c.fill = row_fill; c.border = brd
                 c.number_format = POUND
                 c.alignment = Alignment(horizontal='right', vertical='center')
 
-                c = ws.cell(row=r, column=5, value=f"=D{r}*0.2")
+                c = ws.cell(row=r, column=5, value=vat)
                 c.font = font; c.fill = row_fill; c.border = brd
                 c.number_format = POUND
                 c.alignment = Alignment(horizontal='right', vertical='center')
 
-                c = ws.cell(row=r, column=6, value=f"=D{r}+E{r}")
+                c = ws.cell(row=r, column=6, value=total)
                 c.font = font; c.fill = row_fill; c.border = brd
                 c.number_format = POUND
                 c.alignment = Alignment(horizontal='right', vertical='center')
@@ -438,9 +442,12 @@ def build_workbook(salon_name, period, stylists, stock):
         c.fill = opfill(FILL_PURPLE); c.border = brd_t
         c.alignment = Alignment(horizontal='right', vertical='center', indent=1)
 
-        for col, col_l in [(4, 'D'), (5, 'E'), (6, 'F')]:
-            c = ws.cell(row=total_row, column=col,
-                        value=f"=SUM({col_l}{data_start}:{col_l}{last_data})")
+        matched_items = [it for it in items if it.get('cost') is not None]
+        total_ex  = round(sum(it['cost'] * it['qty'] for it in matched_items), 2)
+        total_vat = round(total_ex * 0.2, 2)
+        total_inc = round(total_ex + total_vat, 2)
+        for col, val in [(4, total_ex), (5, total_vat), (6, total_inc)]:
+            c = ws.cell(row=total_row, column=col, value=val)
             c.font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
             c.fill = opfill(FILL_PURPLE); c.border = brd_t
             c.number_format = POUND
@@ -499,16 +506,16 @@ def build_workbook(salon_name, period, stylists, stock):
                 c.fill = row_fill; c.border = brd
                 c.alignment = Alignment(horizontal='center', vertical='center')
         else:
-            last_row_on_sheet = 4 + len(items) + 1
-            sheet_ref = f"'{stylist}'"
-            c = ws_sum.cell(row=r, column=3,
-                            value=f"={sheet_ref}!D{last_row_on_sheet}")
+            matched = [it for it in items if it.get('cost') is not None]
+            s_ex  = round(sum(it['cost'] * it['qty'] for it in matched), 2)
+            s_inc = round(s_ex * 1.2, 2)
+
+            c = ws_sum.cell(row=r, column=3, value=s_ex)
             c.font = Font(name='Arial', size=10, color=FILL_DARK)
             c.fill = row_fill; c.border = brd; c.number_format = POUND
             c.alignment = Alignment(horizontal='right', vertical='center')
 
-            c = ws_sum.cell(row=r, column=4,
-                            value=f"={sheet_ref}!F{last_row_on_sheet}")
+            c = ws_sum.cell(row=r, column=4, value=s_inc)
             c.font = Font(name='Arial', size=10, color=FILL_DARK)
             c.fill = row_fill; c.border = brd; c.number_format = POUND
             c.alignment = Alignment(horizontal='right', vertical='center')
@@ -519,9 +526,13 @@ def build_workbook(salon_name, period, stylists, stock):
     c.font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
     c.fill = opfill(FILL_PURPLE); c.border = brd_t
     c.alignment = Alignment(horizontal='right', vertical='center', indent=1)
-    for col, col_l in [(3, 'C'), (4, 'D')]:
-        c = ws_sum.cell(row=grand_r, column=col,
-                        value=f"=SUM({col_l}4:{col_l}{grand_r - 1})")
+
+    grand_ex  = round(sum(
+        round(sum(it['cost'] * it['qty'] for it in stylists[s] if it.get('cost')), 2)
+        for s in ordered), 2)
+    grand_inc = round(grand_ex * 1.2, 2)
+    for col, val in [(3, grand_ex), (4, grand_inc)]:
+        c = ws_sum.cell(row=grand_r, column=col, value=val)
         c.font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
         c.fill = opfill(FILL_PURPLE); c.border = brd_t; c.number_format = POUND
         c.alignment = Alignment(horizontal='right', vertical='center')
